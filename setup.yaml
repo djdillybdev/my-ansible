@@ -47,7 +47,12 @@
     - name: macOS Setup
       when: ansible_facts['os_family'] == "Darwin"
       block:
-        - name: Install Homebrew Bundle
+        - name: Remove quarantine attributes from existing apps
+          ansible.builtin.shell: |
+            xattr -d -r com.apple.quarantine /Applications/*.app 2>/dev/null || true
+          changed_when: false
+
+        - name: Install Homebrew Brewfile
           ansible.builtin.command: brew bundle --file="{{ playbook_dir }}/Brewfile"
 
     - name: Apply macOS defaults
