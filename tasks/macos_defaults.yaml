@@ -1,0 +1,102 @@
+---
+- name: "Set Dock to autohide"
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: autohide
+    type: bool
+    value: true
+  notify: "Restart Dock"
+
+- name: "Finder: show all filename extensions"
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: AppleShowAllExtensions
+    type: bool
+    value: true
+
+- name: "Finder: show status bar"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: ShowStatusBar
+    type: bool
+    value: true
+
+- name: "Finder: show path bar"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: ShowPathbar
+    type: bool
+    value: true
+
+- name: "Display full POSIX path as Finder window title"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: _FXShowPosixPathInTitle
+    type: bool
+    value: true
+
+- name: "Keep folders on top when sorting by name"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: _FXSortFoldersFirst
+    type: bool
+    value: true
+
+- name: "When performing a search, search the current folder by default"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: FXDefaultSearchScope
+    type: string
+    value: "SCcf"
+
+- name: "Enable spring loading for directories"
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: com.apple.springing.enabled
+    type: bool
+    value: true
+
+- name: "Remove the spring loading delay for directories"
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: com.apple.springing.delay
+    type: float
+    value: 0
+
+- name: "Avoid creating .DS_Store files on network volumes"
+  community.general.osx_defaults:
+    domain: com.apple.desktopservices
+    key: DSDontWriteNetworkStores
+    type: bool
+    value: true
+
+- name: "Avoid creating .DS_Store files on USB volumes"
+  community.general.osx_defaults:
+    domain: com.apple.desktopservices
+    key: DSDontWriteUSBStores
+    type: bool
+    value: true
+
+- name: "Use list view in all Finder windows by default"
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: FXPreferredViewStyle
+    type: string
+    value: "Nlsv"
+
+- name: Ensure specific apps are in the Dock
+  ansible.builtin.command: dockutil --add "/Applications/{{ item }}.app" --no-restart
+  loop:
+    - Ghostty
+    - Firefox
+    - Spotify
+    - Obsidian
+    - Books
+    - Discord
+    - WhatsApp
+    - ProtonVPN
+    - Calendar
+  register: dockutil_result
+  changed_when: "'already exists' not in dockutil_result.stdout"
+  failed_when: false
+  notify: "Restart Dock"

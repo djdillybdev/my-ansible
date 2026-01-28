@@ -1,0 +1,82 @@
+---
+- name: "Bootstrap Workstation"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    local_bin: "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+
+  tasks:
+    # --- 1. Preparation ---
+    - name: Ensure ~/.local/bin exists
+      ansible.builtin.file:
+        path: "{{ local_bin }}"
+        state: directory
+        mode: "0755"
+
+    # --- 2. Universal Installers (Mac/Linux/WSL) ---
+
+    # INSTALL MISE
+    - name: Check if Mise is installed
+      ansible.builtin.stat:
+        path: "{{ local_bin }}/mise"
+      register: mise_bin
+
+    - name: Install Mise (Universal)
+      ansible.builtin.shell: |
+        curl https://mise.run | sh
+      environment:
+        MISE_INSTALL_PATH: "{{ local_bin }}/mise"
+      when: not mise_bin.stat.exists
+
+    # INSTALL CHEZMOI
+    - name: Check if Chezmoi is installed
+      ansible.builtin.stat:
+        path: "{{ local_bin }}/chezmoi"
+      register: chezmoi_bin
+
+    - name: Install Chezmoi (Universal)
+      ansible.builtin.shell: |
+        sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "{{ local_bin }}"
+      when: not chezmoi_bin.stat.exists
+
+    # --- 3. Platform Specifics ---
+
+    # macOS
+    - name: macOS Setup
+      when: ansible_facts['os_family'] == "Darwin"
+      block:
+        - name: Install Homebrew Bundle
+          ansible.builtin.command: brew bundle --file="{{ playbook_dir }}/Brewfile"
+
+    - name: Apply macOS defaults
+      ansible.builtin.import_tasks: tasks/macos_defaults.yaml
+      when: ansible_facts['os_family'] == "Darwin"
+
+    # Linux / WSL
+    - name: Linux Setup
+      when: ansible_facts['os_family'] == "Debian"
+      become: true
+      block:
+        - name: Install System Basics
+          ansible.builtin.apt:
+            name: [git, curl, unzip, build-essential, fish]
+            state: present
+            update_cache: yes
+
+    # --- 4. Shell Setup ---
+    - name: Add ~/.local/bin to Fish path (Initial Setup)
+      # We do this specifically so it works immediately after install
+      # The permanent solution is in your dotfiles/config.fish
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts['env']['HOME'] }}/.config/fish/config.fish"
+        line: "fish_add_path ~/.local/bin"
+        create: yes
+        state: present
+      # Only do this if we haven't applied dotfiles yet to avoid conflicts
+      when: ansible_facts['os_family'] == "Debian" # optional safeguard
+
+  handlers:
+    - name: "Restart Dock"
+      ansible.builtin.command: killall Dock

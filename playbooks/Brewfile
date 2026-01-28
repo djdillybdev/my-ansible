@@ -1,0 +1,33 @@
+
+# System Utils
+brew "ansible"
+brew "dockutil"
+brew "sevenzip"
+
+# Shell
+brew "fish"
+
+# GUI Apps (casks)
+cask "1password"
+cask "appcleaner"
+cask "discord"
+cask "firefox"
+cask "f.lux"
+cask "google-chrome"
+cask "ghostty"
+cask "grandperspective"
+cask "microsoft-teams"
+cask "obsidian"
+cask "protonvpn"
+cask "slack"
+cask "spotify"
+cask "steam"
+cask "todoist"
+cask "visual-studio-code"
+cask "vlc"
+cask "whatsapp"
+cask "zoom"
+
+# Fonts
+cask "font-symbols-only-nerd-font"
+cask "font-jetbrains-mono-nerd-font"
