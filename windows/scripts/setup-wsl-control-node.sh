@@ -7,10 +7,7 @@ if ! command -v apt >/dev/null 2>&1; then
 fi
 
 sudo apt update
-sudo apt install -y python3 python3-pip git openssh-client
-
-export PATH="$HOME/.local/bin:$PATH"
-python3 -m pip install --user ansible
+sudo apt install -y ansible git openssh-client
 
 if [[ -f requirements.yml ]]; then
   if ! command -v ansible-galaxy >/dev/null 2>&1; then

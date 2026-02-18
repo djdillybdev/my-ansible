@@ -41,8 +41,7 @@ wsl -l -v
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip git openssh-client
-python3 -m pip install --user ansible
+sudo apt install -y ansible git openssh-client
 ```
 
 Clone repo and install collections:
@@ -50,7 +49,7 @@ Clone repo and install collections:
 ```bash
 git clone <your-repo-url>
 cd windows
-~/.local/bin/ansible-galaxy collection install -r requirements.yml
+ansible-galaxy collection install -r requirements.yml
 ```
 
 Optional helper script:
