@@ -5,9 +5,19 @@ Single-user Windows bootstrap for reinstall/new machine setup.
 This workflow is **WSL-first**:
 
 - Control node: Ubuntu on WSL (where you run Ansible).
-- Managed node: Windows host via WinRM (can be the same machine).
+- Managed node: Windows host over **PowerShell Remoting Protocol (PSRP) via HTTPS**.
 
 WSL installation is treated as a prerequisite and is disabled by default in the playbook config.
+
+## Is WinRM required from WSL?
+
+You need a Windows remoting transport from WSL for `ansible.windows` modules. In practice:
+
+- `psrp` over HTTPS: default in this repo (recommended)
+- `winrm`: possible, but not the default
+- `ssh`: possible on modern Windows, but not configured here
+
+So WinRM HTTP is not required, but **remote transport is required**.
 
 ## 1) Fresh Windows prerequisite: install WSL
 
@@ -46,7 +56,7 @@ sudo apt install -y python3 python3-pip python3-venv pipx git
 pipx ensurepath
 source ~/.bashrc 2>/dev/null || true
 pipx install ansible
-pipx inject ansible pywinrm
+pipx inject ansible pypsrp
 ```
 
 Clone repo and install collections:
@@ -81,9 +91,10 @@ cp inventory.example.ini inventory.ini
 
 Edit `inventory.ini`:
 
-- `ansible_host`: Windows IP or hostname
+- `ansible_host`: Windows hostname or IP
 - `ansible_user`: Windows account name
 - `ansible_password`: uses `{{ vault_windows_password }}`
+- Keep PSRP/TLS settings from example inventory
 
 ## 4) Configure secrets with Ansible Vault
 
@@ -97,22 +108,46 @@ Set `vault_windows_password` in `group_vars/windows/vault.yml`, then encrypt:
 ansible-vault encrypt group_vars/windows/vault.yml
 ```
 
-## 5) Prepare WinRM on Windows target
+## 5) Configure PSRP over HTTPS on Windows target
 
-Run in elevated PowerShell on the target Windows host:
+Run in elevated PowerShell on the target Windows host.
+
+1. Choose the hostname you will use in `inventory.ini` as `ansible_host`.
+2. Create a certificate for that hostname and bind WinRM HTTPS listener.
 
 ```powershell
+$Hostname = "YOUR_WINDOWS_HOSTNAME"
+
 Enable-PSRemoting -Force
-Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $true
-Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $true
-Set-NetFirewallRule -Name WINRM-HTTP-In-TCP -Enabled True
-winrm quickconfig -q
+
+$Cert = New-SelfSignedCertificate `
+  -DnsName $Hostname `
+  -CertStoreLocation "Cert:\LocalMachine\My" `
+  -FriendlyName "Ansible PSRP HTTPS"
+
+$Thumb = $Cert.Thumbprint
+
+winrm delete winrm/config/Listener?Address=*+Transport=HTTPS 2>$null
+winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname='$Hostname';CertificateThumbprint='$Thumb'}"
+
+Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $false
+Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $false
+
+if (-not (Get-NetFirewallRule -DisplayName "WinRM HTTPS 5986" -ErrorAction SilentlyContinue)) {
+  New-NetFirewallRule -DisplayName "WinRM HTTPS 5986" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5986
+}
+
+Restart-Service WinRM
+
+Export-Certificate -Cert $Cert -FilePath "$env:USERPROFILE\ansible-psrp-ca.cer" -Force
 ```
 
-Your inventory is configured for NTLM transport, so keep:
+Import the exported cert into WSL trust store:
 
-- `ansible_connection=winrm`
-- `ansible_winrm_transport=ntlm`
+```bash
+sudo cp /mnt/c/Users/<windows-user>/ansible-psrp-ca.cer /usr/local/share/ca-certificates/ansible-psrp-ca.crt
+sudo update-ca-certificates
+```
 
 ## 6) First run
 
@@ -120,6 +155,12 @@ Syntax check:
 
 ```bash
 ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini --syntax-check playbook.yml
+```
+
+Connection test:
+
+```bash
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible windows -i inventory.ini -m ansible.windows.win_ping
 ```
 
 Optional local validation bundle:
@@ -199,19 +240,22 @@ make doctor
 Checks performed:
 
 - required local commands (`ansible-playbook`, `ansible-galaxy`, `python3`)
-- WinRM Python dependency (`pywinrm`) in your Ansible environment
+- PSRP Python dependency (`pypsrp`) in your Ansible environment
 - required repo files
-- inventory placeholders still present (`YOUR_WINDOWS_IP`, `YOUR_WINDOWS_USERNAME`)
-- optional WinRM TCP 5985 reachability test
+- inventory placeholders still present (`YOUR_WINDOWS_HOSTNAME_OR_IP`, `YOUR_WINDOWS_USERNAME`)
+- optional PSRP/WinRM HTTPS TCP 5986 reachability test
 - Ansible syntax check
 
 ## 11) Troubleshooting
 
 - Vault var not found:
   - Ensure `group_vars/windows/vault.yml` exists and includes `vault_windows_password`.
-- WinRM auth failures:
-  - Re-check username/password, firewall, and WinRM service state.
+- TLS/certificate validation failures:
+  - Ensure `ansible_host` exactly matches the cert hostname.
+  - Re-import the Windows-exported cert into WSL trust and run `sudo update-ca-certificates`.
 - Connection timeout:
-  - Verify host/IP reachability from WSL and that WinRM HTTP listener is enabled.
+  - Verify host/IP reachability from WSL and that listener `Transport=HTTPS` is enabled.
+- Auth failures:
+  - Re-check username/password and local policy allowing remote logon for that user.
 - Missing package manager on target:
   - Keep `package_management.bootstrap_missing_managers: true` or preinstall required managers.

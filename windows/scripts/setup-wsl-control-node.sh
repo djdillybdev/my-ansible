@@ -14,7 +14,9 @@ export PATH="$HOME/.local/bin:$PATH"
 if ! command -v ansible >/dev/null 2>&1; then
   pipx install ansible
 fi
-pipx inject ansible pywinrm >/dev/null
+
+# PSRP is the default transport for this repo.
+pipx inject ansible pypsrp >/dev/null
 
 if [[ -f requirements.yml ]]; then
   if ! command -v ansible-galaxy >/dev/null 2>&1; then

@@ -48,7 +48,7 @@ check_cmd ansible-galaxy
 if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
   pass "timeout utility available"
 else
-  warn "timeout utility not found; WinRM port reachability probe will be skipped"
+  warn "timeout utility not found; PSRP port reachability probe will be skipped"
   warn_count=$((warn_count + 1))
 fi
 
@@ -61,19 +61,19 @@ fi
 
 echo
 
-echo "== WinRM Python dependency =="
+echo "== PSRP Python dependency =="
 if command -v pipx >/dev/null 2>&1 && pipx list 2>/dev/null | grep -q "package ansible"; then
-  if pipx runpip ansible show pywinrm >/dev/null 2>&1; then
-    pass "pywinrm installed in pipx ansible environment"
+  if pipx runpip ansible show pypsrp >/dev/null 2>&1; then
+    pass "pypsrp installed in pipx ansible environment"
   else
-    fail "pywinrm missing in pipx ansible environment (run ./scripts/setup-wsl-control-node.sh)"
+    fail "pypsrp missing in pipx ansible environment (run ./scripts/setup-wsl-control-node.sh)"
     fail_count=$((fail_count + 1))
   fi
 else
-  if python3 -c "import winrm" >/dev/null 2>&1; then
-    pass "python3 can import winrm"
+  if python3 -c "import pypsrp" >/dev/null 2>&1; then
+    pass "python3 can import pypsrp"
   else
-    fail "pywinrm not detected (install for your Ansible environment)"
+    fail "pypsrp not detected (install for your Ansible environment)"
     fail_count=$((fail_count + 1))
   fi
 fi
@@ -121,7 +121,7 @@ if [[ -f inventory.ini ]]; then
   target_host="$(extract_inventory_host || true)"
   target_user="$(extract_inventory_user || true)"
 
-  if [[ -z "${target_host:-}" || "$target_host" == "YOUR_WINDOWS_IP" ]]; then
+  if [[ -z "${target_host:-}" || "$target_host" == "YOUR_WINDOWS_HOSTNAME_OR_IP" || "$target_host" == "YOUR_WINDOWS_IP" ]]; then
     fail "inventory.ini ansible_host is not set"
     fail_count=$((fail_count + 1))
   else
@@ -141,27 +141,48 @@ if [[ -f inventory.ini ]]; then
     warn "inventory password is not using vault_windows_password"
     warn_count=$((warn_count + 1))
   fi
+
+  if grep -q '^ansible_connection=psrp' inventory.ini; then
+    pass "inventory uses ansible_connection=psrp"
+  else
+    fail "inventory is not configured for ansible_connection=psrp"
+    fail_count=$((fail_count + 1))
+  fi
+
+  if grep -q '^ansible_psrp_protocol=https' inventory.ini; then
+    pass "inventory uses ansible_psrp_protocol=https"
+  else
+    fail "inventory is not configured for ansible_psrp_protocol=https"
+    fail_count=$((fail_count + 1))
+  fi
+
+  if grep -q '^ansible_psrp_cert_validation=validate' inventory.ini; then
+    pass "inventory enforces TLS cert validation"
+  else
+    fail "inventory must set ansible_psrp_cert_validation=validate"
+    fail_count=$((fail_count + 1))
+  fi
 fi
 
 echo
 
-echo "== WinRM reachability =="
-if [[ -n "${target_host:-}" && "$target_host" != "YOUR_WINDOWS_IP" ]]; then
+echo "== PSRP reachability =="
+if [[ -n "${target_host:-}" && "$target_host" != "YOUR_WINDOWS_HOSTNAME_OR_IP" && "$target_host" != "YOUR_WINDOWS_IP" ]]; then
   timeout_cmd="timeout"
   if ! command -v "$timeout_cmd" >/dev/null 2>&1; then
     timeout_cmd="gtimeout"
   fi
-  if command -v "$timeout_cmd" >/dev/null 2>&1 && "$timeout_cmd" 3 bash -c "</dev/tcp/${target_host}/5985" >/dev/null 2>&1; then
-    pass "WinRM TCP 5985 reachable on $target_host"
+  if command -v "$timeout_cmd" >/dev/null 2>&1 && "$timeout_cmd" 3 bash -c "</dev/tcp/${target_host}/5986" >/dev/null 2>&1; then
+    pass "PSRP/WinRM HTTPS TCP 5986 reachable on $target_host"
   elif command -v "$timeout_cmd" >/dev/null 2>&1; then
-    warn "WinRM TCP 5985 is not reachable on $target_host"
+    warn "PSRP/WinRM HTTPS TCP 5986 is not reachable on $target_host"
     warn_count=$((warn_count + 1))
   else
-    warn "timeout utility unavailable; skipping WinRM TCP reachability probe"
+    warn "timeout utility unavailable; skipping PSRP TCP reachability probe"
     warn_count=$((warn_count + 1))
   fi
 else
-  warn "skipping WinRM port check because ansible_host is not configured"
+  warn "skipping PSRP port check because ansible_host is not configured"
   warn_count=$((warn_count + 1))
 fi
 
