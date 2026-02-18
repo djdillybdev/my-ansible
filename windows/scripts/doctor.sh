@@ -40,15 +40,30 @@ extract_inventory_user() {
   awk -F= '/^ansible_user=/{print $2; exit}' inventory.ini
 }
 
+extract_inventory_var() {
+  local key="$1"
+  awk -F= -v k="$key" '$1 == k {print substr($0, index($0, "=") + 1); exit}' inventory.ini
+}
+
+expand_user_path() {
+  local p="$1"
+  if [[ "$p" == "~/"* ]]; then
+    printf '%s\n' "$HOME/${p#~/}"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
 echo "== Local prerequisites =="
 check_cmd bash
 check_cmd python3
+check_cmd ssh
 check_cmd ansible-playbook
 check_cmd ansible-galaxy
 if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
   pass "timeout utility available"
 else
-  warn "timeout utility not found; PSRP port reachability probe will be skipped"
+  warn "timeout utility not found; SSH reachability probe will be skipped"
   warn_count=$((warn_count + 1))
 fi
 
@@ -61,25 +76,6 @@ fi
 
 echo
 
-echo "== PSRP Python dependency =="
-if command -v pipx >/dev/null 2>&1 && pipx list 2>/dev/null | grep -q "package ansible"; then
-  if pipx runpip ansible show pypsrp >/dev/null 2>&1; then
-    pass "pypsrp installed in pipx ansible environment"
-  else
-    fail "pypsrp missing in pipx ansible environment (run ./scripts/setup-wsl-control-node.sh)"
-    fail_count=$((fail_count + 1))
-  fi
-else
-  if python3 -c "import pypsrp" >/dev/null 2>&1; then
-    pass "python3 can import pypsrp"
-  else
-    fail "pypsrp not detected (install for your Ansible environment)"
-    fail_count=$((fail_count + 1))
-  fi
-fi
-
-echo
-
 echo "== Required files =="
 check_file playbook.yml
 check_file inventory.example.ini
@@ -87,6 +83,7 @@ check_file requirements.yml
 check_file group_vars/windows.yml
 check_file group_vars/windows_apps_catalog.yml
 check_file scripts/setup-wsl-control-node.sh
+check_file scripts/windows/configure-openssh-localonly.ps1
 
 if [[ -f inventory.ini ]]; then
   pass "file exists: inventory.ini"
@@ -103,14 +100,12 @@ fi
 if [[ -f group_vars/windows/vault.yml ]]; then
   if grep -q '^\$ANSIBLE_VAULT;' group_vars/windows/vault.yml; then
     pass "vault file exists and is encrypted"
-  elif grep -q 'vault_windows_password' group_vars/windows/vault.yml; then
-    pass "vault file contains vault_windows_password key"
   else
-    fail "group_vars/windows/vault.yml is missing vault_windows_password key"
-    fail_count=$((fail_count + 1))
+    warn "group_vars/windows/vault.yml exists but is not encrypted"
+    warn_count=$((warn_count + 1))
   fi
 else
-  warn "group_vars/windows/vault.yml not found (expected if not configured yet)"
+  warn "group_vars/windows/vault.yml not found (optional for SSH key-based workflow)"
   warn_count=$((warn_count + 1))
 fi
 
@@ -120,69 +115,97 @@ echo "== Inventory checks =="
 if [[ -f inventory.ini ]]; then
   target_host="$(extract_inventory_host || true)"
   target_user="$(extract_inventory_user || true)"
+  connection_var="$(extract_inventory_var ansible_connection || true)"
+  shell_type_var="$(extract_inventory_var ansible_shell_type || true)"
+  shell_exec_var="$(extract_inventory_var ansible_shell_executable || true)"
+  key_file_var="$(extract_inventory_var ansible_ssh_private_key_file || true)"
 
   if [[ -z "${target_host:-}" || "$target_host" == "YOUR_WINDOWS_HOSTNAME_OR_IP" || "$target_host" == "YOUR_WINDOWS_IP" ]]; then
     fail "inventory.ini ansible_host is not set"
+    fail_count=$((fail_count + 1))
+  elif [[ "$target_host" != "127.0.0.1" ]]; then
+    fail "inventory ansible_host must be 127.0.0.1 for this local loopback workflow"
     fail_count=$((fail_count + 1))
   else
     pass "inventory target host: $target_host"
   fi
 
-  if [[ -z "${target_user:-}" || "$target_user" == "YOUR_WINDOWS_USERNAME" ]]; then
+  if [[ -z "${target_user:-}" || "$target_user" == "YOUR_WINDOWS_USERNAME" || "$target_user" == ".\\YOUR_WINDOWS_USERNAME" ]]; then
     fail "inventory.ini ansible_user is not set"
     fail_count=$((fail_count + 1))
   else
     pass "inventory user: $target_user"
   fi
 
-  if grep -q 'vault_windows_password' inventory.ini; then
-    pass "inventory uses vault_windows_password"
+  if [[ "$connection_var" == "ssh" ]]; then
+    pass "inventory uses ansible_connection=ssh"
   else
-    warn "inventory password is not using vault_windows_password"
+    fail "inventory must set ansible_connection=ssh"
+    fail_count=$((fail_count + 1))
+  fi
+
+  if grep -q '^ansible_port=22$' inventory.ini; then
+    pass "inventory uses SSH port 22"
+  else
+    warn "inventory does not explicitly set ansible_port=22"
     warn_count=$((warn_count + 1))
   fi
 
-  if grep -q '^ansible_connection=psrp' inventory.ini; then
-    pass "inventory uses ansible_connection=psrp"
+  if [[ "$shell_type_var" == "powershell" ]]; then
+    pass "inventory uses ansible_shell_type=powershell"
   else
-    fail "inventory is not configured for ansible_connection=psrp"
+    fail "inventory must set ansible_shell_type=powershell"
     fail_count=$((fail_count + 1))
   fi
 
-  if grep -q '^ansible_psrp_protocol=https' inventory.ini; then
-    pass "inventory uses ansible_psrp_protocol=https"
+  if [[ "$shell_exec_var" == "powershell.exe" ]]; then
+    pass "inventory uses ansible_shell_executable=powershell.exe"
   else
-    fail "inventory is not configured for ansible_psrp_protocol=https"
+    fail "inventory must set ansible_shell_executable=powershell.exe"
     fail_count=$((fail_count + 1))
   fi
 
-  if grep -q '^ansible_psrp_cert_validation=validate' inventory.ini; then
-    pass "inventory enforces TLS cert validation"
+  if [[ -z "$key_file_var" || "$key_file_var" == "YOUR_PRIVATE_KEY_PATH" ]]; then
+    key_file_var="~/.ssh/id_ed25519"
+    warn "ansible_ssh_private_key_file not set; defaulting check to $key_file_var"
+    warn_count=$((warn_count + 1))
+  fi
+
+  resolved_key_file="$(expand_user_path "$key_file_var")"
+  if [[ -f "$resolved_key_file" ]]; then
+    pass "SSH private key exists: $resolved_key_file"
   else
-    fail "inventory must set ansible_psrp_cert_validation=validate"
+    fail "SSH private key not found: $resolved_key_file"
     fail_count=$((fail_count + 1))
+  fi
+
+  if [[ -f "${resolved_key_file}.pub" ]]; then
+    pass "SSH public key exists: ${resolved_key_file}.pub"
+  else
+    warn "SSH public key not found: ${resolved_key_file}.pub"
+    warn_count=$((warn_count + 1))
   fi
 fi
 
 echo
 
-echo "== PSRP reachability =="
-if [[ -n "${target_host:-}" && "$target_host" != "YOUR_WINDOWS_HOSTNAME_OR_IP" && "$target_host" != "YOUR_WINDOWS_IP" ]]; then
+echo "== SSH reachability =="
+if [[ -n "${target_host:-}" && "$target_host" == "127.0.0.1" ]]; then
   timeout_cmd="timeout"
   if ! command -v "$timeout_cmd" >/dev/null 2>&1; then
     timeout_cmd="gtimeout"
   fi
-  if command -v "$timeout_cmd" >/dev/null 2>&1 && "$timeout_cmd" 3 bash -c "</dev/tcp/${target_host}/5986" >/dev/null 2>&1; then
-    pass "PSRP/WinRM HTTPS TCP 5986 reachable on $target_host"
+  if command -v "$timeout_cmd" >/dev/null 2>&1 && "$timeout_cmd" 3 bash -c "</dev/tcp/${target_host}/22" >/dev/null 2>&1; then
+    pass "SSH TCP 22 reachable on $target_host"
   elif command -v "$timeout_cmd" >/dev/null 2>&1; then
-    warn "PSRP/WinRM HTTPS TCP 5986 is not reachable on $target_host"
+    warn "SSH TCP 22 is not reachable on $target_host"
     warn_count=$((warn_count + 1))
   else
-    warn "timeout utility unavailable; skipping PSRP TCP reachability probe"
+    warn "timeout utility unavailable; skipping SSH TCP reachability probe"
     warn_count=$((warn_count + 1))
   fi
 else
-  warn "skipping PSRP port check because ansible_host is not configured"
+  warn "skipping SSH port check because ansible_host is not 127.0.0.1"
   warn_count=$((warn_count + 1))
 fi
 

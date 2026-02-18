@@ -7,16 +7,10 @@ if ! command -v apt >/dev/null 2>&1; then
 fi
 
 sudo apt update
-sudo apt install -y python3 python3-pip python3-venv pipx git
+sudo apt install -y python3 python3-pip git openssh-client
 
-pipx ensurepath
 export PATH="$HOME/.local/bin:$PATH"
-if ! command -v ansible >/dev/null 2>&1; then
-  pipx install ansible
-fi
-
-# PSRP is the default transport for this repo.
-pipx inject ansible pypsrp >/dev/null
+python3 -m pip install --user ansible
 
 if [[ -f requirements.yml ]]; then
   if ! command -v ansible-galaxy >/dev/null 2>&1; then
@@ -29,3 +23,4 @@ else
 fi
 
 echo "WSL control node setup complete."
+echo "If you do not already have a key, run: ssh-keygen -t ed25519"

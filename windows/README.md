@@ -2,61 +2,47 @@
 
 Single-user Windows bootstrap for reinstall/new machine setup.
 
-This workflow is **WSL-first**:
+This workflow is intentionally minimal and optimized for one-time use:
 
-- Control node: Ubuntu on WSL (where you run Ansible).
-- Managed node: Windows host over **PowerShell Remoting Protocol (PSRP) via HTTPS**.
+- Control node: Ubuntu in WSL.
+- Managed node: your local Windows host over OpenSSH loopback (`127.0.0.1:22`).
+- Security posture: key-based SSH auth, localhost-only listener.
 
-WSL installation is treated as a prerequisite and is disabled by default in the playbook config.
+## Transport model
 
-## Is WinRM required from WSL?
+This repo uses SSH to manage Windows:
 
-You need a Windows remoting transport from WSL for `ansible.windows` modules. In practice:
+- `ansible_connection=ssh`
+- `ansible_host=127.0.0.1`
+- `ansible_port=22`
+- `ansible_shell_type=powershell`
+- `ansible_shell_executable=powershell.exe`
 
-- `psrp` over HTTPS: default in this repo (recommended)
-- `winrm`: possible, but not the default
-- `ssh`: possible on modern Windows, but not configured here
+Windows module support remains unchanged (`ansible.windows.*`).
 
-So WinRM HTTP is not required, but **remote transport is required**.
+## 1) Install WSL on fresh Windows
 
-## 1) Fresh Windows prerequisite: install WSL
-
-Run in an elevated PowerShell terminal:
+Run in elevated PowerShell:
 
 ```powershell
 wsl --install
 wsl --set-default-version 2
 ```
 
-Reboot when prompted, open Ubuntu, and complete first-user setup.
+Reboot if prompted, open Ubuntu, and finish first-user setup.
 
-Verify WSL2 is active:
+Verify:
 
 ```powershell
 wsl -l -v
-```
-
-Your distro should show `VERSION` = `2`. If it does not:
-
-```powershell
-wsl --set-version Ubuntu 2
-```
-
-Then verify from Ubuntu:
-
-```bash
-uname -a
 ```
 
 ## 2) Prepare WSL Ubuntu (control node)
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-pip python3-venv pipx git
-pipx ensurepath
-source ~/.bashrc 2>/dev/null || true
-pipx install ansible
-pipx inject ansible pypsrp
+sudo apt install -y python3-pip git openssh-client
+python3 -m pip install --user ansible
 ```
 
 Clone repo and install collections:
@@ -64,26 +50,88 @@ Clone repo and install collections:
 ```bash
 git clone <your-repo-url>
 cd windows
-ansible-galaxy collection install -r requirements.yml
+~/.local/bin/ansible-galaxy collection install -r requirements.yml
 ```
 
-Optional helper script for fresh WSL setup:
+Optional helper script:
 
 ```bash
 ./scripts/setup-wsl-control-node.sh
 ```
 
-## 3) Configure inventory and variables
+## 3) Configure OpenSSH as local-only (Admin PowerShell)
 
-Primary config files:
+Run this helper script on the Windows machine you are bootstrapping:
 
-- `inventory.example.ini`
-- `inventory.ini` (local, gitignored)
-- `group_vars/windows.yml`
-- `group_vars/windows_apps_catalog.yml`
-- `group_vars/windows/vault.yml` (optional, encrypted)
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass -Force
+.\scripts\windows\configure-openssh-localonly.ps1
+```
 
-Create local inventory from example:
+The script does all of the following:
+
+- Installs OpenSSH Server capability if missing.
+- Enables and starts `sshd` with automatic startup.
+- Forces `ListenAddress 127.0.0.1` in `C:\ProgramData\ssh\sshd_config`.
+- Adds a dedicated firewall rule `OpenSSH 22 Localhost Only`.
+- Restarts `sshd` and prints listener summary.
+
+## 4) Create a local admin Ansible user (recommended)
+
+If your normal login is tied to a Microsoft account, create a dedicated local admin user for Ansible.
+
+Run in elevated PowerShell:
+
+```powershell
+$Username = "ansible"
+$Password = Read-Host "Enter password for local ansible user" -AsSecureString
+
+if (-not (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue)) {
+  New-LocalUser -Name $Username -Password $Password -FullName "Ansible Local Admin" -Description "Local automation account for bootstrap"
+}
+
+Add-LocalGroupMember -Group "Administrators" -Member $Username -ErrorAction SilentlyContinue
+```
+
+## 5) Set up SSH key auth from WSL
+
+Generate a key in WSL if needed:
+
+```bash
+ssh-keygen -t ed25519
+```
+
+Copy the public key text:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+Append that line to:
+
+- `C:\Users\<WINDOWS_USER>\.ssh\authorized_keys`
+
+Quick PowerShell helper (run as that target user or in elevated PowerShell with adjusted path):
+
+```powershell
+$User = "ansible"
+$SshDir = "C:\Users\$User\.ssh"
+$AuthKeys = Join-Path $SshDir 'authorized_keys'
+
+New-Item -ItemType Directory -Path $SshDir -Force | Out-Null
+if (-not (Test-Path $AuthKeys)) { New-Item -ItemType File -Path $AuthKeys -Force | Out-Null }
+notepad $AuthKeys
+```
+
+Paste the WSL public key as a single line, save, then verify:
+
+```bash
+ssh ansible@127.0.0.1
+```
+
+## 6) Configure inventory
+
+Create local inventory:
 
 ```bash
 cp inventory.example.ini inventory.ini
@@ -91,135 +139,76 @@ cp inventory.example.ini inventory.ini
 
 Edit `inventory.ini`:
 
-- `ansible_host`: Windows hostname or IP
-- `ansible_user`: Windows account name
-- `ansible_password`: uses `{{ vault_windows_password }}`
-- Keep PSRP/TLS settings from example inventory
+- Set `ansible_user` to your Windows admin user.
+- Set `ansible_ssh_private_key_file` to your private key path if not `~/.ssh/id_ed25519`.
 
-## 4) Configure secrets with Ansible Vault
+No password is required in inventory for this workflow.
 
-```bash
-cp group_vars/windows/vault.example.yml group_vars/windows/vault.yml
-```
-
-Set `vault_windows_password` in `group_vars/windows/vault.yml`, then encrypt:
-
-```bash
-ansible-vault encrypt group_vars/windows/vault.yml
-```
-
-## 5) Configure PSRP over HTTPS on Windows target
-
-Run in elevated PowerShell on the target Windows host.
-
-1. Choose the hostname you will use in `inventory.ini` as `ansible_host`.
-2. Create a certificate for that hostname and bind WinRM HTTPS listener.
-
-```powershell
-$Hostname = "YOUR_WINDOWS_HOSTNAME"
-
-Enable-PSRemoting -Force
-
-$Cert = New-SelfSignedCertificate `
-  -DnsName $Hostname `
-  -CertStoreLocation "Cert:\LocalMachine\My" `
-  -FriendlyName "Ansible PSRP HTTPS"
-
-$Thumb = $Cert.Thumbprint
-
-winrm delete winrm/config/Listener?Address=*+Transport=HTTPS 2>$null
-winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname='$Hostname';CertificateThumbprint='$Thumb'}"
-
-Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $false
-Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $false
-
-if (-not (Get-NetFirewallRule -DisplayName "WinRM HTTPS 5986" -ErrorAction SilentlyContinue)) {
-  New-NetFirewallRule -DisplayName "WinRM HTTPS 5986" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5986
-}
-
-Restart-Service WinRM
-
-Export-Certificate -Cert $Cert -FilePath "$env:USERPROFILE\ansible-psrp-ca.cer" -Force
-```
-
-Import the exported cert into WSL trust store:
-
-```bash
-sudo cp /mnt/c/Users/<windows-user>/ansible-psrp-ca.cer /usr/local/share/ca-certificates/ansible-psrp-ca.crt
-sudo update-ca-certificates
-```
-
-## 6) First run
+## 7) Validate and run
 
 Syntax check:
 
 ```bash
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini --syntax-check playbook.yml
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ~/.local/bin/ansible-playbook -i inventory.ini --syntax-check playbook.yml
 ```
 
 Connection test:
 
 ```bash
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible windows -i inventory.ini -m ansible.windows.win_ping
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ~/.local/bin/ansible -i inventory.ini windows -m ansible.windows.win_ping
 ```
 
-Optional local validation bundle:
-
-```bash
-make check
-```
-
-Recommended preflight before first run or after Windows changes:
+Doctor preflight:
 
 ```bash
 make doctor
 ```
 
-Run bootstrap:
+Run the bootstrap:
 
 ```bash
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini playbook.yml
+ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ~/.local/bin/ansible-playbook -i inventory.ini playbook.yml
 ```
 
-## 7) Ongoing use (drift correction)
+## 8) Common failures and fastest fixes
 
-Re-run anytime after editing `group_vars/windows.yml`:
+Timeout or cannot connect:
+
+```powershell
+Get-Service sshd
+Get-Content C:\ProgramData\ssh\sshd_config | Select-String ListenAddress
+```
+
+- Ensure `sshd` is running.
+- Ensure `ListenAddress 127.0.0.1` is set.
+- Re-run `.\scripts\windows\configure-openssh-localonly.ps1`.
+
+Auth fails:
+
+- Confirm `ansible_user` matches the Windows user with the installed key.
+- Confirm the matching private key path in inventory.
+- Test direct SSH first: `ssh <user>@127.0.0.1`.
+
+Host key mismatch from reinstalled machine:
 
 ```bash
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini playbook.yml
+ssh-keygen -R 127.0.0.1
 ```
 
-Targeted runs:
+Then retry SSH.
 
-```bash
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini playbook.yml --tags apps
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini playbook.yml --tags runtimes
-ANSIBLE_LOCAL_TEMP=/tmp/ansible-local ansible-playbook -i inventory.ini playbook.yml --tags dotfiles
-```
+Access denied on admin-required tasks:
 
-## 8) Common customizations
+- Use an account in local `Administrators`.
+- Confirm the SSH session for that user works before running Ansible.
 
-In `group_vars/windows.yml`:
+## 9) Deprecated WinRM helper
 
-- Keep `windows_apps_selection.include_categories` and `include_apps` empty to install full catalog.
-- Use `windows_apps_selection.exclude_apps` to skip specific apps.
-- Toggle phases with `windows_bootstrap_features` (for this workflow, `wsl` defaults to `false`).
+`./scripts/windows/configure-winrm-localonly.ps1` is retained only for legacy fallback paths and is no longer the default transport workflow.
 
-In `group_vars/windows_apps_catalog.yml`:
+## 10) WinUtil (manual, optional)
 
-- Organize apps by category key (for example `dev`, `browser`, `utility`).
-- Add/remove apps or adjust package IDs inside each category list.
-
-If you want playbook-driven WSL changes anyway:
-
-- Set `windows_bootstrap_features.wsl: true`
-- Configure `wsl.install_method` (`winget` or `wsl_cli`)
-
-## 9) WinUtil (manual, recommended)
-
-WinUtil is intentionally not automated by this playbook by default.
-
-Run it manually in elevated PowerShell when you want to apply system tweaks:
+Run manually in elevated PowerShell:
 
 ```powershell
 irm https://christitus.com/win | iex
@@ -228,34 +217,3 @@ irm https://christitus.com/win | iex
 Project link:
 
 - https://github.com/ChrisTitusTech/winutil
-
-## 10) Preflight Doctor
-
-Run:
-
-```bash
-make doctor
-```
-
-Checks performed:
-
-- required local commands (`ansible-playbook`, `ansible-galaxy`, `python3`)
-- PSRP Python dependency (`pypsrp`) in your Ansible environment
-- required repo files
-- inventory placeholders still present (`YOUR_WINDOWS_HOSTNAME_OR_IP`, `YOUR_WINDOWS_USERNAME`)
-- optional PSRP/WinRM HTTPS TCP 5986 reachability test
-- Ansible syntax check
-
-## 11) Troubleshooting
-
-- Vault var not found:
-  - Ensure `group_vars/windows/vault.yml` exists and includes `vault_windows_password`.
-- TLS/certificate validation failures:
-  - Ensure `ansible_host` exactly matches the cert hostname.
-  - Re-import the Windows-exported cert into WSL trust and run `sudo update-ca-certificates`.
-- Connection timeout:
-  - Verify host/IP reachability from WSL and that listener `Transport=HTTPS` is enabled.
-- Auth failures:
-  - Re-check username/password and local policy allowing remote logon for that user.
-- Missing package manager on target:
-  - Keep `package_management.bootstrap_missing_managers: true` or preinstall required managers.

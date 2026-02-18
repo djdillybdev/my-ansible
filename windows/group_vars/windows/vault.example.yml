@@ -1,2 +1,5 @@
-# Copy to group_vars/windows/vault.yml and encrypt with ansible-vault.
-vault_windows_password: 'REPLACE_ME'
+# Optional vault file for future secrets.
+# SSH key-based transport does not require a Windows password secret.
+#
+# Example:
+# vault_api_token: 'REPLACE_ME'
