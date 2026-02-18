@@ -3,3 +3,7 @@
 *.log
 venv/
 .venv/
+
+# Ansible vault files (but allow example files)
+**/vault.yml
+!vault.example.yml
