@@ -46,6 +46,7 @@ sudo apt install -y python3 python3-pip python3-venv pipx git
 pipx ensurepath
 source ~/.bashrc 2>/dev/null || true
 pipx install ansible
+pipx inject ansible pywinrm
 ```
 
 Clone repo and install collections:
@@ -66,10 +67,17 @@ Optional helper script for fresh WSL setup:
 
 Primary config files:
 
-- `inventory.ini`
+- `inventory.example.ini`
+- `inventory.ini` (local, gitignored)
 - `group_vars/windows.yml`
 - `group_vars/windows_apps_catalog.yml`
 - `group_vars/windows/vault.yml` (optional, encrypted)
+
+Create local inventory from example:
+
+```bash
+cp inventory.example.ini inventory.ini
+```
 
 Edit `inventory.ini`:
 
@@ -191,6 +199,7 @@ make doctor
 Checks performed:
 
 - required local commands (`ansible-playbook`, `ansible-galaxy`, `python3`)
+- WinRM Python dependency (`pywinrm`) in your Ansible environment
 - required repo files
 - inventory placeholders still present (`YOUR_WINDOWS_IP`, `YOUR_WINDOWS_USERNAME`)
 - optional WinRM TCP 5985 reachability test

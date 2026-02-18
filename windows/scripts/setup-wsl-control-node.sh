@@ -10,11 +10,17 @@ sudo apt update
 sudo apt install -y python3 python3-pip python3-venv pipx git
 
 pipx ensurepath
+export PATH="$HOME/.local/bin:$PATH"
 if ! command -v ansible >/dev/null 2>&1; then
   pipx install ansible
 fi
+pipx inject ansible pywinrm >/dev/null
 
 if [[ -f requirements.yml ]]; then
+  if ! command -v ansible-galaxy >/dev/null 2>&1; then
+    echo "ansible-galaxy not found on PATH; restart shell and re-run." >&2
+    exit 1
+  fi
   ansible-galaxy collection install -r requirements.yml
 else
   echo "requirements.yml not found in current directory; skipping collection install." >&2

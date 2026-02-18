@@ -45,6 +45,12 @@ check_cmd bash
 check_cmd python3
 check_cmd ansible-playbook
 check_cmd ansible-galaxy
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  pass "timeout utility available"
+else
+  warn "timeout utility not found; WinRM port reachability probe will be skipped"
+  warn_count=$((warn_count + 1))
+fi
 
 if command -v ansible-lint >/dev/null 2>&1; then
   pass "command available: ansible-lint"
@@ -55,13 +61,58 @@ fi
 
 echo
 
+echo "== WinRM Python dependency =="
+if command -v pipx >/dev/null 2>&1 && pipx list 2>/dev/null | grep -q "package ansible"; then
+  if pipx runpip ansible show pywinrm >/dev/null 2>&1; then
+    pass "pywinrm installed in pipx ansible environment"
+  else
+    fail "pywinrm missing in pipx ansible environment (run ./scripts/setup-wsl-control-node.sh)"
+    fail_count=$((fail_count + 1))
+  fi
+else
+  if python3 -c "import winrm" >/dev/null 2>&1; then
+    pass "python3 can import winrm"
+  else
+    fail "pywinrm not detected (install for your Ansible environment)"
+    fail_count=$((fail_count + 1))
+  fi
+fi
+
+echo
+
 echo "== Required files =="
 check_file playbook.yml
-check_file inventory.ini
+check_file inventory.example.ini
 check_file requirements.yml
 check_file group_vars/windows.yml
 check_file group_vars/windows_apps_catalog.yml
 check_file scripts/setup-wsl-control-node.sh
+
+if [[ -f inventory.ini ]]; then
+  pass "file exists: inventory.ini"
+else
+  fail "missing file: inventory.ini (create it with: cp inventory.example.ini inventory.ini)"
+  fail_count=$((fail_count + 1))
+fi
+
+if [[ -f inventory.ini ]] && cmp -s inventory.ini inventory.example.ini; then
+  warn "inventory.ini still matches inventory.example.ini placeholders"
+  warn_count=$((warn_count + 1))
+fi
+
+if [[ -f group_vars/windows/vault.yml ]]; then
+  if grep -q '^\$ANSIBLE_VAULT;' group_vars/windows/vault.yml; then
+    pass "vault file exists and is encrypted"
+  elif grep -q 'vault_windows_password' group_vars/windows/vault.yml; then
+    pass "vault file contains vault_windows_password key"
+  else
+    fail "group_vars/windows/vault.yml is missing vault_windows_password key"
+    fail_count=$((fail_count + 1))
+  fi
+else
+  warn "group_vars/windows/vault.yml not found (expected if not configured yet)"
+  warn_count=$((warn_count + 1))
+fi
 
 echo
 
@@ -96,10 +147,17 @@ echo
 
 echo "== WinRM reachability =="
 if [[ -n "${target_host:-}" && "$target_host" != "YOUR_WINDOWS_IP" ]]; then
-  if timeout 3 bash -c "</dev/tcp/${target_host}/5985" >/dev/null 2>&1; then
+  timeout_cmd="timeout"
+  if ! command -v "$timeout_cmd" >/dev/null 2>&1; then
+    timeout_cmd="gtimeout"
+  fi
+  if command -v "$timeout_cmd" >/dev/null 2>&1 && "$timeout_cmd" 3 bash -c "</dev/tcp/${target_host}/5985" >/dev/null 2>&1; then
     pass "WinRM TCP 5985 reachable on $target_host"
-  else
+  elif command -v "$timeout_cmd" >/dev/null 2>&1; then
     warn "WinRM TCP 5985 is not reachable on $target_host"
+    warn_count=$((warn_count + 1))
+  else
+    warn "timeout utility unavailable; skipping WinRM TCP reachability probe"
     warn_count=$((warn_count + 1))
   fi
 else
