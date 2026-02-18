@@ -1,0 +1,94 @@
+---
+- name: Ensure bootstrap directories exist
+  ansible.windows.win_file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - '{{ windows_bootstrap_root }}'
+    - '{{ windows_installers_dir }}'
+    - '{{ windows_logs_dir }}'
+  tags: [apps, runtimes, browsers, extensions, wsl, dotfiles]
+
+- name: Normalize effective bootstrap configuration
+  ansible.builtin.set_fact:
+    windows_install_policy: >-
+      {{
+        {
+          "default_scope": (windows_install_policy.default_scope | default(install_policy.default_scope | default("machine"))),
+          "require_preflight_resolution": (
+            windows_install_policy.require_preflight_resolution |
+            default(package_management.require_preflight_resolution | default(install_policy.require_preflight_resolution | default(true)))
+          )
+        }
+      }}
+    windows_package_management: >-
+      {{
+        {
+          "manager_order": (
+            windows_package_management.manager_order |
+            default(package_management.manager_order | default([package_management.primary_manager | default("winget")] + (package_management.fallback_managers | default(["choco", "scoop"]))))
+          ),
+          "bootstrap_missing_managers": (
+            windows_package_management.bootstrap_missing_managers |
+            default(package_management.bootstrap_missing_managers | default(true))
+          )
+        }
+      }}
+    windows_runtime_defaults: "{{ windows_runtime_defaults | default(runtime_defaults | default({})) }}"
+    windows_browser_baseline: "{{ windows_browser_baseline | default(browser_baseline | default({})) }}"
+    windows_browser_targets: "{{ windows_browser_targets | default(browser_targets | default({})) }}"
+    windows_dotfiles: "{{ windows_dotfiles | default(dotfiles | default({})) }}"
+    windows_wsl: "{{ windows_wsl | default(wsl | default({})) }}"
+    windows_browser_extensions: "{{ windows_browser_extensions | default(browser_extensions | default({})) }}"
+    windows_apps_catalog: "{{ windows_apps_catalog | default(apps_catalog | default([])) }}"
+  tags: [always]
+
+- name: Ensure package managers are available
+  ansible.builtin.include_role:
+    name: windows_pkg_managers
+  when: >-
+    (windows_bootstrap_features.apps | default(true)) or
+    (windows_bootstrap_features.runtimes | default(true)) or
+    (windows_bootstrap_features.wsl | default(true))
+  tags: [apps, runtimes, wsl]
+
+- name: Install application catalog
+  ansible.builtin.include_role:
+    name: windows_packages
+  when: windows_bootstrap_features.apps | default(true)
+  tags: [apps]
+
+- name: Configure runtime defaults
+  ansible.builtin.include_role:
+    name: windows_runtimes
+  when: windows_bootstrap_features.runtimes | default(true)
+  tags: [runtimes]
+
+- name: Apply dotfiles
+  ansible.builtin.include_role:
+    name: windows_dotfiles
+  when: windows_bootstrap_features.dotfiles | default(true)
+  tags: [dotfiles]
+
+- name: Apply browser policy
+  ansible.builtin.include_role:
+    name: windows_browsers
+  when: windows_bootstrap_features.browsers | default(true)
+  tags: [browsers]
+
+- name: Enforce browser extensions
+  ansible.builtin.include_role:
+    name: windows_extensions
+  when: windows_bootstrap_features.extensions | default(true)
+  tags: [extensions]
+
+- name: Configure WSL
+  ansible.builtin.include_role:
+    name: windows_wsl
+  when: windows_bootstrap_features.wsl | default(true)
+  tags: [wsl]
+
+- name: Write consolidated report
+  ansible.builtin.include_role:
+    name: windows_reporting
+  tags: [report]

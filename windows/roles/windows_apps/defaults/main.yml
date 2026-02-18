@@ -1,0 +1,37 @@
+windows_bootstrap_root: 'C:\\bootstrap'
+windows_installers_dir: "{{ windows_bootstrap_root }}\\installers"
+windows_logs_dir: "{{ windows_bootstrap_root }}\\logs"
+
+windows_bootstrap_features:
+  apps: true
+  runtimes: true
+  dotfiles: true
+  browsers: true
+  extensions: true
+  wsl: true
+
+windows_install_policy:
+  default_scope: machine
+  require_preflight_resolution: true
+
+windows_package_management:
+  manager_order:
+    - winget
+    - choco
+    - scoop
+  bootstrap_missing_managers: true
+
+windows_runtime_defaults: {}
+windows_browser_baseline: {}
+windows_browser_targets: {}
+windows_dotfiles: {}
+windows_wsl: {}
+windows_browser_extensions: {}
+windows_apps_catalog: []
+
+windows_apps_selection:
+  include_categories: []
+  include_apps: []
+  exclude_apps: []
+
+windows_fallback_require_checksum: true

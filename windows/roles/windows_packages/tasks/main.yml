@@ -1,0 +1,310 @@
+---
+- name: Normalize app catalog into flat list
+  ansible.builtin.set_fact:
+    windows_apps_catalog_flat: []
+
+- name: Use catalog directly when already flat
+  ansible.builtin.set_fact:
+    windows_apps_catalog_flat: "{{ windows_apps_catalog | default([]) }}"
+  when: windows_apps_catalog is sequence
+
+- name: Expand category-grouped catalog entries
+  ansible.builtin.set_fact:
+    windows_apps_catalog_flat: >-
+      {{
+        (windows_apps_catalog_flat | default([])) +
+        [ item.1 | combine({ "category": item.0.key }) ]
+      }}
+  loop: "{{ query('subelements', (windows_apps_catalog | default({}) | dict2items), 'value') }}"
+  loop_control:
+    label: "{{ item.1.name | default('<missing-name>') }}"
+  when: windows_apps_catalog is mapping
+
+- name: Validate app catalog entry structure
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | length > 0
+      - item.category is defined
+      - >-
+        (item.winget_id is defined) or
+        (item.choco_id is defined) or
+        (item.scoop_id is defined) or
+        (item.fallback is defined)
+    fail_msg: >-
+      Invalid app catalog entry. Each app must include name/category and at least one package id
+      (winget_id/choco_id/scoop_id) or fallback.
+  loop: '{{ windows_apps_catalog_flat | default([]) }}'
+  loop_control:
+    label: '{{ item.name | default("<missing-name>") }}'
+
+- name: Initialize filtered app catalog
+  ansible.builtin.set_fact:
+    target_apps: []
+
+- name: Select target apps from catalog
+  ansible.builtin.set_fact:
+    target_apps: '{{ (target_apps | default([])) + [item] }}'
+  loop: '{{ windows_apps_catalog_flat | default([]) }}'
+  loop_control:
+    label: '{{ item.name }}'
+  when:
+    - item.enabled | default(true)
+    - >-
+      (
+        (windows_apps_selection.include_categories | default([]) | length == 0) and
+        (windows_apps_selection.include_apps | default([]) | length == 0)
+      ) or
+      (item.category in (windows_apps_selection.include_categories | default([]))) or
+      (item.name in (windows_apps_selection.include_apps | default([])))
+    - item.name not in (windows_apps_selection.exclude_apps | default([]))
+
+- name: Initialize preflight result sets
+  ansible.builtin.set_fact:
+    resolved_apps: []
+    unresolved_apps: []
+
+- name: Resolve package manager for each app
+  ansible.builtin.set_fact:
+    resolved_apps: >-
+      {{
+        (resolved_apps | default([])) +
+        (
+          [ item | combine({
+              "package_manager": selected_manager,
+              "package_id": item[selected_manager ~ "_id"]
+            }) ]
+          if (selected_manager | length > 0)
+          else []
+        )
+      }}
+    unresolved_apps: >-
+      {{
+        (unresolved_apps | default([])) +
+        (
+          [ item ]
+          if (selected_manager | length == 0)
+          else []
+        )
+      }}
+  vars:
+    app_supported_managers: >-
+      {{
+        ((item.winget_id is defined) | ternary(["winget"], [])) +
+        ((item.choco_id is defined) | ternary(["choco"], [])) +
+        ((item.scoop_id is defined) | ternary(["scoop"], []))
+      }}
+    selected_manager: >-
+      {{
+        (
+          effective_manager_order | default([]) |
+          select("in", available_managers | default([])) |
+          select("in", app_supported_managers) | list | first
+        ) | default("")
+      }}
+  loop: '{{ target_apps | default([]) }}'
+  loop_control:
+    label: '{{ item.name }}'
+
+- name: Build unresolved app sets
+  ansible.builtin.set_fact:
+    unresolved_required_no_fallback: '{{ unresolved_apps | selectattr("required", "defined") | selectattr("required") | rejectattr("fallback", "defined") | list }}'
+    fallback_apps: '{{ unresolved_apps | selectattr("fallback", "defined") | list }}'
+
+- name: Write preflight summary
+  ansible.windows.win_copy:
+    dest: '{{ windows_logs_dir }}\\preflight.json'
+    content: |
+      {{ {
+          "resolved": resolved_apps | map(attribute="name") | list,
+          "unresolved": unresolved_apps | map(attribute="name") | list,
+          "fallback_candidates": fallback_apps | map(attribute="name") | list,
+          "hard_fail_unresolved": unresolved_required_no_fallback | map(attribute="name") | list
+        } | to_nice_json }}
+
+- name: Fail when required apps are unresolved with no fallback
+  ansible.builtin.fail:
+    msg: >-
+      Required apps were not resolvable via configured package managers and have no fallback installer:
+      {{ unresolved_required_no_fallback | map(attribute='name') | join(', ') }}
+  when:
+    - windows_install_policy.require_preflight_resolution | bool
+    - unresolved_required_no_fallback | length > 0
+
+- name: Check whether resolved apps are already installed
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Continue"
+    $manager = "{{ item.package_manager }}"
+    $id = "{{ item.package_id }}"
+
+    switch ($manager) {
+      "winget" {
+        $out = winget list --exact --id $id --accept-source-agreements 2>&1 | Out-String
+        if (($LASTEXITCODE -eq 0) -and ($out -notmatch "No installed package found matching input criteria")) {
+          Write-Output "STATE:INSTALLED"
+        } else {
+          Write-Output "STATE:MISSING"
+        }
+      }
+      "choco" {
+        $out = choco list --local-only --exact $id 2>&1 | Out-String
+        if ($out -match "0 packages installed") {
+          Write-Output "STATE:MISSING"
+        } else {
+          Write-Output "STATE:INSTALLED"
+        }
+      }
+      "scoop" {
+        $out = scoop list $id 2>&1 | Out-String
+        if (($LASTEXITCODE -eq 0) -and ($out -match [regex]::Escape($id))) {
+          Write-Output "STATE:INSTALLED"
+        } else {
+          Write-Output "STATE:MISSING"
+        }
+      }
+      default {
+        Write-Output "STATE:MISSING"
+      }
+    }
+  args:
+    executable: powershell.exe
+  loop: '{{ resolved_apps | default([]) }}'
+  loop_control:
+    label: '{{ item.name }} ({{ item.package_manager }}:{{ item.package_id }})'
+  register: package_state_results
+  changed_when: false
+  failed_when: false
+
+- name: Initialize install candidate sets
+  ansible.builtin.set_fact:
+    apps_to_install: []
+    already_installed_apps: []
+
+- name: Build install candidate sets
+  ansible.builtin.set_fact:
+    apps_to_install: >-
+      {{
+        (apps_to_install | default([])) +
+        ([item.item] if (item.stdout is not search('STATE:INSTALLED')) else [])
+      }}
+    already_installed_apps: >-
+      {{
+        (already_installed_apps | default([])) +
+        ([item.item] if (item.stdout is search('STATE:INSTALLED')) else [])
+      }}
+  loop: '{{ package_state_results.results | default([]) }}'
+  loop_control:
+    label: '{{ item.item.name | default("unknown") }}'
+
+- name: Install missing packages via selected manager
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Continue"
+    $manager = "{{ item.package_manager }}"
+    $id = "{{ item.package_id }}"
+    $scope = "{{ item.scope | default(windows_install_policy.default_scope | default('machine')) }}"
+
+    switch ($manager) {
+      "winget" {
+        winget install -e --id $id --scope $scope --accept-package-agreements --accept-source-agreements --disable-interactivity
+      }
+      "choco" {
+        choco install $id -y --no-progress
+      }
+      "scoop" {
+        scoop install $id
+      }
+      default {
+        throw "Unsupported package manager: $manager"
+      }
+    }
+  args:
+    executable: powershell.exe
+  loop: '{{ apps_to_install | default([]) }}'
+  loop_control:
+    label: '{{ item.name }} ({{ item.package_manager }}:{{ item.package_id }})'
+  register: package_install_results
+  vars:
+    install_output: '{{ (package_install_results.stdout | default("")) ~ " " ~ (package_install_results.stderr | default("")) }}'
+  changed_when: >-
+    package_install_results.rc == 0 and
+    (install_output is search('Successfully installed|Installation successful|installed successfully|Successfully upgraded|Upgraded'))
+  failed_when: >-
+    (item.required | default(true)) and
+    (package_install_results.rc != 0) and
+    (install_output is not search('already installed|No applicable upgrade found|is already installed|Found an existing package already installed'))
+
+- name: Validate fallback definitions
+  ansible.builtin.assert:
+    that:
+      - item.fallback.url is defined
+      - item.fallback.filename is defined
+      - (not windows_fallback_require_checksum | bool) or (item.fallback.checksum is defined)
+    fail_msg: >-
+      Fallback app {{ item.name }} must define fallback.url, fallback.filename,
+      and fallback.checksum when windows_fallback_require_checksum=true.
+  loop: '{{ fallback_apps | default([]) }}'
+  loop_control:
+    label: '{{ item.name }}'
+
+- name: Download fallback installers
+  ansible.windows.win_get_url:
+    url: '{{ item.fallback.url }}'
+    dest: '{{ windows_installers_dir }}\\{{ item.fallback.filename }}'
+    checksum: '{{ item.fallback.checksum | default(omit) }}'
+  loop: '{{ fallback_apps | default([]) }}'
+  loop_control:
+    label: '{{ item.name }}'
+  register: fallback_download_results
+
+- name: Install fallback packages
+  ansible.windows.win_package:
+    path: '{{ windows_installers_dir }}\\{{ item.fallback.filename }}'
+    arguments: '{{ item.fallback.silent_args | default(omit) }}'
+    product_id: '{{ item.fallback.product_id | default(omit) }}'
+    state: present
+  loop: '{{ fallback_apps | default([]) }}'
+  loop_control:
+    label: '{{ item.name }}'
+  register: fallback_install_results
+
+- name: Validate fallback installs when validation command is provided
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Stop"
+    {{ item.fallback.validate_command }}
+  args:
+    executable: powershell.exe
+  loop: '{{ fallback_apps | selectattr("fallback.validate_command", "defined") | list }}'
+  loop_control:
+    label: '{{ item.name }}'
+  register: fallback_validation_results
+  changed_when: false
+
+- name: Write package installation summary
+  ansible.windows.win_copy:
+    dest: '{{ windows_logs_dir }}\\package-results.json'
+    content: |
+      {{ {
+          "attempted": (resolved_apps | default([])) | map(attribute="name") | list,
+          "already_installed": (already_installed_apps | default([])) | map(attribute="name") | list,
+          "install_attempted": (apps_to_install | default([])) | map(attribute="name") | list,
+          "succeeded": (
+            package_install_results.results | default([]) |
+            selectattr("rc", "eq", 0) |
+            map(attribute="item.name") | list
+          ),
+          "failed": (
+            package_install_results.results | default([]) |
+            rejectattr("rc", "eq", 0) |
+            map(attribute="item.name") | list
+          ),
+          "fallback_attempted": (fallback_apps | default([])) | map(attribute="name") | list,
+          "fallback_installed": (
+            fallback_install_results.results | default([]) |
+            selectattr("failed", "undefined") |
+            map(attribute="item.name") | list
+          ),
+          "manager_map": (
+            resolved_apps | default([]) |
+            items2dict(key_name="name", value_name="package_manager")
+          )
+        } | to_nice_json }}

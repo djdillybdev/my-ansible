@@ -1,0 +1,12 @@
+---
+- name: Ensure Chrome policy root exists
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome
+    state: present
+  when: windows_browser_baseline.install_chrome | default(true)
+
+- name: Ensure Edge policy root exists
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge
+    state: present
+  when: windows_browser_baseline.install_edge | default(true)

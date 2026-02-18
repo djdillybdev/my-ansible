@@ -1,0 +1,266 @@
+windows_apps_catalog:
+  browser:
+    - name: Edge
+      winget_id: Microsoft.Edge
+      choco_id: microsoft-edge
+      required: true
+      scope: machine
+    - name: Chrome
+      winget_id: Google.Chrome
+      choco_id: googlechrome
+      scoop_id: googlechrome
+      required: true
+      scope: machine
+    - name: Zen Browser
+      winget_id: Zen-Team.Zen-Browser
+      required: true
+      scope: machine
+  comms:
+    - name: Discord
+      winget_id: Discord.Discord
+      choco_id: discord
+      required: true
+      scope: machine
+    - name: Slack
+      winget_id: SlackTechnologies.Slack
+      choco_id: slack
+      required: true
+      scope: machine
+    - name: Teams
+      winget_id: Microsoft.Teams
+      required: true
+      scope: machine
+    - name: Zoom
+      winget_id: Zoom.Zoom
+      choco_id: zoom
+      required: true
+      scope: machine
+    - name: Beeper
+      winget_id: Beeper.Beeper
+      required: true
+      scope: machine
+  dev:
+    - name: Docker Desktop
+      winget_id: Docker.DockerDesktop
+      choco_id: docker-desktop
+      required: true
+      scope: machine
+    - name: Git
+      winget_id: Git.Git
+      choco_id: git
+      scoop_id: git
+      required: true
+      scope: machine
+    - name: GitHub CLI
+      winget_id: GitHub.cli
+      choco_id: gh
+      scoop_id: gh
+      required: true
+      scope: machine
+    - name: GitHub Desktop
+      winget_id: GitHub.GitHubDesktop
+      choco_id: github-desktop
+      required: true
+      scope: machine
+    - name: Godot Engine
+      winget_id: GodotEngine.GodotEngine
+      required: true
+      scope: machine
+    - name: Go
+      winget_id: GoLang.Go
+      choco_id: golang
+      scoop_id: go
+      required: true
+      scope: machine
+    - name: Helix
+      winget_id: Helix.Helix
+      scoop_id: helix
+      required: true
+      scope: machine
+    - name: Lazygit
+      winget_id: JesseDuffield.lazygit
+      choco_id: lazygit
+      scoop_id: lazygit
+      required: true
+      scope: machine
+    - name: Lazydocker
+      winget_id: JesseDuffield.lazydocker
+      required: true
+      scope: machine
+    - name: Node.js LTS
+      winget_id: OpenJS.NodeJS.LTS
+      choco_id: nodejs-lts
+      scoop_id: nodejs-lts
+      required: true
+      scope: machine
+    - name: NVM for Windows
+      winget_id: CoreyButler.NVMforWindows
+      choco_id: nvm
+      required: true
+      scope: machine
+    - name: Python
+      winget_id: Python.Python.3.12
+      choco_id: python312
+      scoop_id: python
+      required: true
+      scope: machine
+    - name: Rustup
+      winget_id: Rustlang.Rustup
+      choco_id: rustup.install
+      scoop_id: rustup
+      required: true
+      scope: machine
+    - name: Starship
+      winget_id: Starship.Starship
+      choco_id: starship
+      scoop_id: starship
+      required: true
+      scope: machine
+    - name: VS Code
+      winget_id: Microsoft.VisualStudioCode
+      choco_id: vscode
+      scoop_id: vscode
+      required: true
+      scope: machine
+  productivity:
+    - name: Anki
+      winget_id: Anki.Anki
+      choco_id: anki
+      required: true
+      scope: machine
+    - name: Calibre
+      winget_id: calibre.calibre
+      choco_id: calibre
+      required: true
+      scope: machine
+    - name: Notepad++
+      winget_id: Notepad++.Notepad++
+      choco_id: notepadplusplus
+      scoop_id: notepadplusplus
+      required: true
+      scope: machine
+    - name: Obsidian
+      winget_id: Obsidian.Obsidian
+      choco_id: obsidian
+      scoop_id: obsidian
+      required: true
+      scope: machine
+  gaming:
+    - name: Prism Launcher
+      winget_id: PrismLauncher.PrismLauncher
+      required: true
+      scope: machine
+    - name: Steam
+      winget_id: Valve.Steam
+      choco_id: steam
+      required: true
+      scope: machine
+  microsoft:
+    - name: Autoruns
+      winget_id: Microsoft.Sysinternals.Autoruns
+      choco_id: autoruns
+      required: true
+      scope: machine
+    - name: PowerShell
+      winget_id: Microsoft.PowerShell
+      choco_id: powershell-core
+      required: true
+      scope: machine
+    - name: PowerToys
+      winget_id: Microsoft.PowerToys
+      choco_id: powertoys
+      required: true
+      scope: machine
+    - name: TCPView
+      winget_id: Microsoft.Sysinternals.TCPView
+      required: true
+      scope: machine
+    - name: Windows Terminal
+      winget_id: Microsoft.WindowsTerminal
+      choco_id: microsoft-windows-terminal
+      required: true
+      scope: machine
+  media:
+    - name: GIMP
+      winget_id: GIMP.GIMP
+      choco_id: gimp
+      scoop_id: gimp
+      required: true
+      scope: machine
+    - name: Greenshot
+      winget_id: Greenshot.Greenshot
+      choco_id: greenshot
+      required: true
+      scope: machine
+    - name: VLC
+      winget_id: VideoLAN.VLC
+      choco_id: vlc
+      scoop_id: vlc
+      required: true
+      scope: machine
+  utility:
+    - name: ProtonVPN
+      winget_id: Proton.ProtonVPN
+      required: true
+      scope: machine
+    - name: 1Password
+      winget_id: AgileBits.1Password
+      choco_id: 1password
+      required: true
+      scope: machine
+    - name: 7-Zip
+      winget_id: 7zip.7zip
+      choco_id: 7zip
+      scoop_id: 7zip
+      required: true
+      scope: machine
+    - name: bat
+      winget_id: sharkdp.bat
+      choco_id: bat
+      scoop_id: bat
+      required: true
+      scope: machine
+    - name: DevToys
+      winget_id: DevToys-app.DevToys
+      required: true
+      scope: machine
+    - name: Everything
+      winget_id: voidtools.Everything
+      choco_id: everything
+      scoop_id: everything
+      required: true
+      scope: machine
+    - name: Fastfetch
+      winget_id: Fastfetch-cli.Fastfetch
+      choco_id: fastfetch
+      scoop_id: fastfetch
+      required: true
+      scope: machine
+    - name: F.lux
+      winget_id: f.lux
+      choco_id: flux
+      required: true
+      scope: machine
+    - name: fzf
+      winget_id: junegunn.fzf
+      choco_id: fzf
+      scoop_id: fzf
+      required: true
+      scope: machine
+    - name: ripgrep
+      winget_id: BurntSushi.ripgrep.MSVC
+      choco_id: ripgrep
+      scoop_id: ripgrep
+      required: true
+      scope: machine
+    - name: Cold Turkey
+      winget_id: ColdTurkeySoftware.ColdTurkeyBlocker
+      required: true
+      scope: machine
+  dotfiles:
+    - name: chezmoi
+      winget_id: twpayne.chezmoi
+      choco_id: chezmoi
+      scoop_id: chezmoi
+      required: true
+      scope: machine

@@ -1,0 +1,59 @@
+---
+- name: Ensure WSL base features are enabled
+  ansible.windows.win_optional_feature:
+    name: '{{ item }}'
+    state: present
+  loop:
+    - Microsoft-Windows-Subsystem-Linux
+    - VirtualMachinePlatform
+  register: wsl_features
+
+- name: Reboot when WSL feature changes require it
+  ansible.windows.win_reboot:
+    msg: Rebooting to complete WSL2 feature setup
+    reboot_timeout: 3600
+  when: wsl_features is changed
+
+- name: Set WSL default version to 2
+  ansible.windows.win_shell: wsl --set-default-version 2
+  args:
+    executable: powershell.exe
+  changed_when: false
+  failed_when: false
+
+- name: Install distro via winget
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Continue"
+    winget install -e --id "{{ windows_wsl.ubuntu_winget_id | default('Canonical.Ubuntu.2404') }}" --accept-package-agreements --accept-source-agreements --disable-interactivity
+  args:
+    executable: powershell.exe
+  register: ubuntu_install
+  vars:
+    ubuntu_output: '{{ (ubuntu_install.stdout | default("")) ~ " " ~ (ubuntu_install.stderr | default("")) }}'
+  changed_when: >-
+    ubuntu_install.rc == 0 and
+    (ubuntu_output is search('Successfully installed|Installation successful|Installed'))
+  failed_when: >-
+    (ubuntu_install.rc != 0) and
+    (ubuntu_output is not search('already installed|No applicable upgrade found|is already installed|Found an existing package already installed'))
+  when: windows_wsl.install_method | default('winget') == 'winget'
+
+- name: Install distro via wsl --install
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Continue"
+    wsl --install -d "{{ windows_wsl.distro_name | default('Ubuntu-24.04') }}"
+  args:
+    executable: powershell.exe
+  register: ubuntu_install_wsl_cli
+  changed_when: ubuntu_install_wsl_cli.rc == 0
+  failed_when: false
+  when: windows_wsl.install_method | default('winget') == 'wsl_cli'
+
+- name: Set default distro
+  ansible.windows.win_shell: |
+    wsl --set-default "{{ windows_wsl.set_default_distro_name | default('Ubuntu-24.04') }}"
+  args:
+    executable: powershell.exe
+  changed_when: false
+  failed_when: false
+  when: windows_wsl.install_method | default('winget') != 'skip'

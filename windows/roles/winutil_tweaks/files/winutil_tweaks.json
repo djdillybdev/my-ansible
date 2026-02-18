@@ -1,0 +1,18 @@
+{
+  "WPFTweaks": [
+    "WPFTweaksRestorePoint",
+    "WPFTweaksDiskCleanup",
+    "WPFTweaksWPBT",
+    "WPFTweaksEndTaskOnTaskbar",
+    "WPFTweaksDisableExplorerAutoDiscovery",
+    "WPFTweaksActivity",
+    "WPFTweaksPowershell7Tele",
+    "WPFTweaksServices",
+    "WPFTweaksTelemetry",
+    "WPFTweaksConsumerFeatures",
+    "WPFTweaksRemoveCopilot",
+    "WPFTweaksDeleteTempFiles",
+    "WPFTweaksWidget",
+    "WPFTweaksRemoveGallery"
+  ]
+}

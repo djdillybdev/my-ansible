@@ -1,0 +1,75 @@
+---
+- name: Pin Node.js version with nvm for Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Stop"
+    $nvmCmd = Get-Command nvm -ErrorAction SilentlyContinue
+    if (-not $nvmCmd) {
+      throw "nvm command not found. Ensure CoreyButler.NVMforWindows installed successfully."
+    }
+
+    nvm install {{ windows_runtime_defaults.node_version_pin }}
+    nvm use {{ windows_runtime_defaults.node_version_pin }}
+    node -v
+  args:
+    executable: powershell.exe
+  register: node_pin_result
+  changed_when: node_pin_result.stdout is search('Downloading|Now using node')
+  when: windows_runtime_defaults.node_install_method | default('nvm_windows') == 'nvm_windows'
+
+- name: Ensure pinned Python version target is installed
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Stop"
+    $manager = "{{ python_install_manager }}"
+    $id = "{{ python_install_id }}"
+    $scope = "{{ windows_install_policy.default_scope | default('machine') }}"
+
+    switch ($manager) {
+      "winget" {
+        winget install -e --id $id --scope $scope --accept-package-agreements --accept-source-agreements --disable-interactivity
+      }
+      "choco" {
+        choco install $id -y --no-progress
+      }
+      "scoop" {
+        scoop install $id
+      }
+      default {
+        throw "Unsupported Python package manager: $manager"
+      }
+    }
+
+    py --version
+  args:
+    executable: powershell.exe
+  register: python_pin_result
+  vars:
+    python_output: '{{ (python_pin_result.stdout | default("")) ~ " " ~ (python_pin_result.stderr | default("")) }}'
+    python_app_entry: '{{ (windows_apps_catalog | selectattr("name", "equalto", "Python") | list | first) | default({}) }}'
+    python_supported_managers: >-
+      {{
+        ((python_app_entry.winget_id is defined) | ternary(["winget"], [])) +
+        ((python_app_entry.choco_id is defined) | ternary(["choco"], [])) +
+        ((python_app_entry.scoop_id is defined) | ternary(["scoop"], []))
+      }}
+    python_install_manager: >-
+      {{
+        (
+          effective_manager_order | default([]) |
+          select("in", available_managers | default([])) |
+          select("in", python_supported_managers) | list | first
+        ) | default("winget")
+      }}
+    python_install_id: >-
+      {{
+        (
+          python_app_entry[python_install_manager ~ "_id"]
+          if (python_app_entry[python_install_manager ~ "_id"] is defined)
+          else windows_runtime_defaults.python_winget_id
+        )
+      }}
+  changed_when: >-
+    python_pin_result.rc == 0 and
+    (python_output is search('Successfully installed|Installation successful|Installed'))
+  failed_when: >-
+    (python_pin_result.rc != 0) and
+    (python_output is not search('already installed|No applicable upgrade found|is already installed|Found an existing package already installed'))

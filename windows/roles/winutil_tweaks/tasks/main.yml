@@ -1,0 +1,49 @@
+---
+- name: Ensure bootstrap directory exists
+  ansible.windows.win_file:
+    path: C:\bootstrap
+    state: directory
+
+- name: Check WinUtil script exists locally
+  ansible.builtin.stat:
+    path: '{{ winutil.script_local_path }}'
+  delegate_to: localhost
+  run_once: true
+  register: winutil_local_script
+
+- name: Copy pinned WinUtil script from repository
+  ansible.windows.win_copy:
+    src: winutil.ps1
+    dest: C:\bootstrap\winutil.ps1
+  when: winutil_local_script.stat.exists | default(false)
+
+- name: Download WinUtil script when local copy is unavailable
+  ansible.windows.win_get_url:
+    url: '{{ winutil.script_url }}'
+    dest: C:\bootstrap\winutil.ps1
+    checksum: '{{ winutil.script_checksum if (winutil.script_checksum | length > 0) else omit }}'
+  when:
+    - not (winutil_local_script.stat.exists | default(false))
+    - winutil.script_url | length > 0
+
+- name: Fail when no WinUtil script source is available
+  ansible.builtin.fail:
+    msg: >-
+      WinUtil script is missing from roles/winutil_tweaks/files/winutil.ps1 and winutil.script_url is empty.
+      Add a pinned script file or configure winutil.script_url (+ optional winutil.script_checksum).
+  when:
+    - not (winutil_local_script.stat.exists | default(false))
+    - winutil.script_url | length == 0
+
+- name: Copy WinUtil tweaks config
+  ansible.windows.win_copy:
+    src: '{{ winutil.tweaks_config_src }}'
+    dest: C:\bootstrap\winutil_tweaks.json
+
+- name: Run WinUtil with tweaks config
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Stop"
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\bootstrap\winutil.ps1 -Config C:\bootstrap\winutil_tweaks.json -Run
+  args:
+    executable: powershell.exe
+  when: winutil.enabled | default(true)

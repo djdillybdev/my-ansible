@@ -1,0 +1,2 @@
+# Copy to group_vars/windows/vault.yml and encrypt with ansible-vault.
+vault_windows_password: 'REPLACE_ME'

@@ -1,0 +1,20 @@
+- name: Windows bootstrap
+  hosts: windows
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load app catalog
+      ansible.builtin.include_vars:
+        file: group_vars/windows_apps_catalog.yml
+
+    - name: Load vaulted Windows secrets when present
+      ansible.builtin.include_vars:
+        file: group_vars/windows/vault.yml
+      ignore_errors: true
+      no_log: true
+
+  tasks:
+    - name: Run Windows bootstrap
+      ansible.builtin.include_role:
+        name: windows_apps
+      tags: [apps, runtimes, dotfiles, browsers, extensions, wsl]

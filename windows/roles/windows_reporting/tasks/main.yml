@@ -1,0 +1,42 @@
+---
+- name: Write consolidated bootstrap report
+  ansible.windows.win_copy:
+    dest: '{{ windows_logs_dir }}\\bootstrap-report.json'
+    content: |
+      {{ {
+          "resolved_apps": (resolved_apps | default([])) | map(attribute="name") | list,
+          "resolved_manager_map": (
+            resolved_apps | default([]) |
+            items2dict(key_name="name", value_name="package_manager")
+          ),
+          "unresolved_apps": (unresolved_apps | default([])) | map(attribute="name") | list,
+          "fallback_apps": (fallback_apps | default([])) | map(attribute="name") | list,
+          "effective_manager_order": effective_manager_order | default([]),
+          "available_managers": available_managers | default([]),
+          "bootstrapped_managers": bootstrapped_managers | default([]),
+          "already_installed_apps": (already_installed_apps | default([])) | map(attribute="name") | list,
+          "install_attempted_apps": (apps_to_install | default([])) | map(attribute="name") | list,
+          "failed_apps": (
+            package_install_results.results | default([]) |
+            rejectattr("rc", "eq", 0) |
+            map(attribute="item.name") | list
+          ),
+          "node_pin_version": windows_runtime_defaults.node_version_pin | default(''),
+          "python_pin_version": windows_runtime_defaults.python_version_pin | default(''),
+          "browser_baseline": windows_browser_baseline | default({}),
+          "dotfiles": windows_dotfiles | default({}),
+          "extensions": windows_browser_extensions.enforced | default([]),
+          "wsl": windows_wsl | default({})
+        } | to_nice_json }}
+
+- name: Display final bootstrap summary
+  ansible.builtin.debug:
+    msg:
+      - 'Resolved apps: {{ (resolved_apps | default([])) | length }}'
+      - 'Unresolved apps: {{ (unresolved_apps | default([])) | length }}'
+      - 'Already installed apps: {{ (already_installed_apps | default([])) | length }}'
+      - 'Install attempts: {{ (apps_to_install | default([])) | length }}'
+      - 'Fallback apps: {{ (fallback_apps | default([])) | length }}'
+      - 'Failed installs: {{ (package_install_results.results | default([]) | rejectattr("rc", "eq", 0) | list | length) }}'
+      - "Available managers: {{ available_managers | default([]) | join(', ') if (available_managers | default([]) | length > 0) else 'none' }}"
+      - 'Logs path: {{ windows_logs_dir }}'

@@ -1,0 +1,80 @@
+windows_bootstrap_features:
+  apps: true
+  runtimes: true
+  dotfiles: true
+  browsers: true
+  extensions: true
+  # WSL is treated as an external prerequisite for this workflow.
+  wsl: false
+
+install_policy:
+  default_scope: machine
+  require_preflight_resolution: true
+
+package_management:
+  primary_manager: winget
+  fallback_managers:
+    - choco
+    - scoop
+  manager_order:
+    - winget
+    - choco
+    - scoop
+  bootstrap_missing_managers: true
+  require_preflight_resolution: true
+
+runtime_defaults:
+  node_install_method: nvm_windows
+  node_version_pin: "22.14.0"
+  python_version_pin: "3.12"
+  python_winget_id: "Python.Python.3.12"
+
+browser_baseline:
+  install_edge: true
+  install_chrome: true
+  install_zen: true
+  install_firefox: false
+
+browser_targets:
+  chrome: true
+  edge: true
+  firefox: false
+  zen: true
+
+dotfiles:
+  chezmoi:
+    enabled: true
+    repo_url: "https://github.com/example/dotfiles.git"
+    apply_args: "--force"
+
+windows_apps_selection:
+  include_categories: []
+  include_apps: []
+  exclude_apps: []
+
+# App catalog lives in group_vars/windows_apps_catalog.yml.
+
+
+browser_extensions:
+  enforced:
+    - key: cold_turkey
+      chrome_id: "pganeibhckoanndahmnfggfoeofncnii"
+      edge_id: "jfphahkinplobmabmgjmjgflbhjjddeb"
+      firefox_install_url: "https://getcoldturkey.com/files/Cold_Turkey_Firefox_Addon.xpi"
+    - key: enhancer_for_youtube
+      chrome_id: "ponfpcnoihfmfllpaingbgckeeldkhle"
+      edge_id: "ponfpcnoihfmfllpaingbgckeeldkhle"
+      firefox_install_url: "https://addons.mozilla.org/firefox/downloads/latest/enhancer-for-youtube/latest.xpi"
+    - key: ublock_origin
+      chrome_id: "cjpalhdlnbpafiamejdnhcphjbkeiagm"
+      edge_id: "odfafepnkmbhccpbejgmiehpchacaeak"
+      firefox_install_url: "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi"
+    - key: video_speed_controller
+      chrome_id: "nffaoalbilbmmfgbnbgppjihopabppdk"
+      edge_id: "nffaoalbilbmmfgbnbgppjihopabppdk"
+      firefox_install_url: "https://addons.mozilla.org/firefox/downloads/latest/videospeed/latest.xpi"
+
+# Optional: which Ubuntu distro to install via winget
+wsl:
+  ubuntu_winget_id: "Canonical.Ubuntu.2404"
+  set_default_distro_name: "Ubuntu-24.04" # best-effort, name varies

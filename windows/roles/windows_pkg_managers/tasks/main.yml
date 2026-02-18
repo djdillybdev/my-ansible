@@ -1,0 +1,118 @@
+---
+- name: Build effective package manager order
+  ansible.builtin.set_fact:
+    effective_manager_order: '{{ windows_package_management.manager_order | unique }}'
+
+- name: Detect winget
+  ansible.windows.win_shell: winget --version
+  args:
+    executable: powershell.exe
+  register: winget_detect
+  changed_when: false
+  failed_when: false
+
+- name: Detect chocolatey
+  ansible.windows.win_shell: choco --version
+  args:
+    executable: powershell.exe
+  register: choco_detect
+  changed_when: false
+  failed_when: false
+
+- name: Detect scoop
+  ansible.windows.win_shell: scoop --version
+  args:
+    executable: powershell.exe
+  register: scoop_detect
+  changed_when: false
+  failed_when: false
+
+- name: Bootstrap chocolatey when requested and missing
+  ansible.windows.win_shell: |
+    Set-ExecutionPolicy Bypass -Scope Process -Force
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+  args:
+    executable: powershell.exe
+  register: choco_bootstrap
+  changed_when: choco_bootstrap.rc == 0
+  when:
+    - "'choco' in (effective_manager_order | default([]))"
+    - choco_detect.rc != 0
+    - windows_package_management.bootstrap_missing_managers | bool
+
+- name: Bootstrap scoop when requested and missing
+  ansible.windows.win_shell: |
+    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+    irm get.scoop.sh | iex
+  args:
+    executable: powershell.exe
+  register: scoop_bootstrap
+  changed_when: scoop_bootstrap.rc == 0
+  when:
+    - "'scoop' in (effective_manager_order | default([]))"
+    - scoop_detect.rc != 0
+    - windows_package_management.bootstrap_missing_managers | bool
+
+- name: Re-detect winget
+  ansible.windows.win_shell: winget --version
+  args:
+    executable: powershell.exe
+  register: winget_detect_final
+  changed_when: false
+  failed_when: false
+
+- name: Re-detect chocolatey
+  ansible.windows.win_shell: choco --version
+  args:
+    executable: powershell.exe
+  register: choco_detect_final
+  changed_when: false
+  failed_when: false
+
+- name: Re-detect scoop
+  ansible.windows.win_shell: scoop --version
+  args:
+    executable: powershell.exe
+  register: scoop_detect_final
+  changed_when: false
+  failed_when: false
+
+- name: Build available package manager list
+  ansible.builtin.set_fact:
+    available_managers: >-
+      {{
+        (
+          (winget_detect_final.rc == 0) | ternary(["winget"], [])
+        ) + (
+          (choco_detect_final.rc == 0) | ternary(["choco"], [])
+        ) + (
+          (scoop_detect_final.rc == 0) | ternary(["scoop"], [])
+        )
+      }}
+    bootstrapped_managers: >-
+      {{
+        (
+          (choco_bootstrap is defined and choco_bootstrap is changed) | ternary(["choco"], [])
+        ) + (
+          (scoop_bootstrap is defined and scoop_bootstrap is changed) | ternary(["scoop"], [])
+        )
+      }}
+
+- name: Fail when no configured package manager is available
+  ansible.builtin.fail:
+    msg: >-
+      None of the configured package managers are available.
+      Effective order: {{ effective_manager_order | join(', ') }}.
+      Detected: {{ available_managers | join(', ') if available_managers | length > 0 else 'none' }}.
+  when: (effective_manager_order | intersect(available_managers | default([])) | length) == 0
+
+- name: Write package manager summary
+  ansible.windows.win_copy:
+    dest: '{{ windows_logs_dir }}\\package-managers.json'
+    content: |
+      {{ {
+          "effective_order": effective_manager_order | default([]),
+          "available": available_managers | default([]),
+          "bootstrapped": bootstrapped_managers | default([])
+        } | to_nice_json }}

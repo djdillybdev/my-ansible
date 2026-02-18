@@ -1,0 +1,69 @@
+---
+- name: Setup Fabric Minecraft Server on Oracle ARM
+  hosts: minecraft
+  become: true
+  vars:
+    mc_version: "1.21.11" # Change to desired Minecraft version
+    fabric_loader: "0.18.4" # Usually safe to leave as latest
+    server_dir: "/home/minecraft/server"
+    local_world_zip: "./aternos_data.zip" # The zip from your computer
+
+    tasks:
+      - name: Install Java 21 and Tools
+        apt:
+          name: [openjdk-21-jre-headless, screen, ufw, unzip, wget]
+          update_cache: yes
+
+      - name: Create minecraft user
+        user:
+          name: minecraft
+          shell: /bin/bash
+          create_home: yes
+
+      - name: Create server directory
+        file:
+          path: "{{ server_dir }}"
+          state: directory
+          owner: minecraft
+          group: minecraft
+
+      - name: Download Fabric Installer
+        get_url:
+          url: "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.0.1/fabric-installer-1.0.1.jar"
+          dest: "{{ server_dir }}/fabric-installer.jar"
+          owner: minecraft
+          group: minecraft
+
+      - name: Run Fabric Server Installer
+        command:
+          cmd: "java -jar fabric-installer.jar server -mcversion {{ mc_version }} -loader {{ fabric_loader }} -downloadMinecraft"
+          chdir: "{{ server_dir }}"
+          creates: "{{ server_dir }}/fabric-server-launch.jar"
+        become_user: minecraft
+
+      - name: Agree to Minecraft EULA
+        copy:
+          content: "eula=true"
+          dest: "{{ server_dir }}/eula.txt"
+          owner: minecraft
+          group: minecraft
+
+      # --- NEW: WORLD & MOD MIGRATION ---
+      - name: Upload and Unzip Aternos data (World/Mods/Config)
+        unarchive:
+          src: "{{ local_world_zip }}"
+          dest: "{{ server_dir }}"
+          owner: minecraft
+          group: minecraft
+          # This copies from your local PC to the Oracle Server automatically
+          copy: yes
+
+      - name: Open Firewall Ports
+        ufw:
+          rule: allow
+          port: "{{ item }}"
+        loop: ["22", "25565"]
+
+      - name: Enable UFW
+        ufw:
+          state: enabled

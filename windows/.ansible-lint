@@ -1,0 +1,6 @@
+profile: basic
+exclude_paths:
+  - .ansible/
+skip_list:
+  - fqcn[action-core]
+  - yaml[line-length]

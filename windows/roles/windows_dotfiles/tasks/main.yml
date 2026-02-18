@@ -1,0 +1,50 @@
+---
+- name: Skip chezmoi when disabled
+  ansible.builtin.debug:
+    msg: 'windows_dotfiles.chezmoi.enabled is false; skipping chezmoi init/apply.'
+  when: not (windows_dotfiles.chezmoi.enabled | default(false))
+
+- name: Initialize and apply chezmoi dotfiles
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = "Stop"
+
+    $repo = "{{ windows_dotfiles.chezmoi.repo_url }}"
+    if ([string]::IsNullOrWhiteSpace($repo)) {
+      throw "windows_dotfiles.chezmoi.repo_url must be set when chezmoi is enabled."
+    }
+
+    $chezmoi = Get-Command chezmoi -ErrorAction SilentlyContinue
+    if (-not $chezmoi) {
+      throw "chezmoi command not found. Ensure chezmoi is installed in windows_apps_catalog."
+    }
+
+    chezmoi init $repo
+
+    $pending = chezmoi diff --no-pager
+    if ($LASTEXITCODE -gt 1) {
+      throw "chezmoi diff failed."
+    }
+    if ([string]::IsNullOrWhiteSpace($pending)) {
+      Write-Output "No dotfile changes pending"
+      exit 0
+    }
+
+    chezmoi apply {{ windows_dotfiles.chezmoi.apply_args | default('--force') }}
+    Write-Output "Applied dotfile changes"
+  args:
+    executable: powershell.exe
+  register: chezmoi_apply_result
+  changed_when: chezmoi_apply_result.stdout is search('Applied dotfile changes')
+  when: windows_dotfiles.chezmoi.enabled | default(false)
+
+- name: Write chezmoi summary
+  ansible.windows.win_copy:
+    dest: '{{ windows_logs_dir }}\\chezmoi-results.json'
+    content: |
+      {{ {
+          "enabled": windows_dotfiles.chezmoi.enabled | default(false),
+          "repo_url": windows_dotfiles.chezmoi.repo_url | default(''),
+          "changed": (chezmoi_apply_result is defined and chezmoi_apply_result is changed),
+          "stdout": chezmoi_apply_result.stdout_lines | default([])
+        } | to_nice_json }}
+  when: windows_dotfiles.chezmoi.enabled | default(false)

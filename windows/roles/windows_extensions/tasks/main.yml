@@ -1,0 +1,130 @@
+---
+- name: Build extension lists
+  ansible.builtin.set_fact:
+    enforced_extensions: '{{ windows_browser_extensions.enforced | default([]) }}'
+    chrome_force_extensions: '{{ (windows_browser_extensions.enforced | default([])) | selectattr("chrome_id", "defined") | list }}'
+    edge_force_extensions: '{{ (windows_browser_extensions.enforced | default([])) | selectattr("edge_id", "defined") | list }}'
+    firefox_force_extensions: '{{ (windows_browser_extensions.enforced | default([])) | selectattr("firefox_install_url", "defined") | list }}'
+
+- name: Ensure Chrome extension policy root exists
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist
+    state: present
+  when:
+    - windows_browser_targets.chrome | default(windows_browser_baseline.install_chrome | default(true))
+    - chrome_force_extensions | length > 0
+
+- name: Ensure Edge extension policy root exists
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist
+    state: present
+  when:
+    - windows_browser_targets.edge | default(windows_browser_baseline.install_edge | default(true))
+    - edge_force_extensions | length > 0
+
+- name: Force-install configured extensions in Chrome
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist
+    name: '{{ ansible_loop.index }}'
+    type: string
+    data: '{{ item.chrome_id }};https://clients2.google.com/service/update2/crx'
+  loop: '{{ chrome_force_extensions }}'
+  loop_control:
+    extended: true
+    label: '{{ item.key }}'
+  when:
+    - windows_browser_targets.chrome | default(windows_browser_baseline.install_chrome | default(true))
+    - chrome_force_extensions | length > 0
+
+- name: Force-install configured extensions in Edge
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist
+    name: '{{ ansible_loop.index }}'
+    type: string
+    data: '{{ item.edge_id }};https://edge.microsoft.com/extensionwebstorebase/v1/crx'
+  loop: '{{ edge_force_extensions }}'
+  loop_control:
+    extended: true
+    label: '{{ item.key }}'
+  when:
+    - windows_browser_targets.edge | default(windows_browser_baseline.install_edge | default(true))
+    - edge_force_extensions | length > 0
+
+- name: Build Firefox/Zen extension settings map
+  ansible.builtin.set_fact:
+    firefox_extension_settings: >-
+      {{
+        (firefox_extension_settings | default({})) | combine({
+          item.key: {
+            "installation_mode": "force_installed",
+            "install_url": item.firefox_install_url
+          }
+        }, recursive=True)
+      }}
+  loop: '{{ firefox_force_extensions }}'
+  loop_control:
+    label: '{{ item.key }}'
+
+- name: Check Firefox install directory
+  ansible.windows.win_stat:
+    path: C:\Program Files\Mozilla Firefox
+  register: firefox_install_dir
+  when: windows_browser_targets.firefox | default(windows_browser_baseline.install_firefox | default(false))
+
+- name: Check Zen install directory
+  ansible.windows.win_stat:
+    path: C:\Program Files\Zen Browser
+  register: zen_install_dir
+  when: windows_browser_targets.zen | default(windows_browser_baseline.install_zen | default(false))
+
+- name: Ensure Firefox distribution folder exists
+  ansible.windows.win_file:
+    path: C:\Program Files\Mozilla Firefox\distribution
+    state: directory
+  when:
+    - windows_browser_targets.firefox | default(windows_browser_baseline.install_firefox | default(false))
+    - firefox_install_dir is defined
+    - firefox_install_dir.stat.exists | default(false)
+    - firefox_extension_settings | default({}) | length > 0
+
+- name: Ensure Zen distribution folder exists
+  ansible.windows.win_file:
+    path: C:\Program Files\Zen Browser\distribution
+    state: directory
+  when:
+    - windows_browser_targets.zen | default(windows_browser_baseline.install_zen | default(false))
+    - zen_install_dir is defined
+    - zen_install_dir.stat.exists | default(false)
+    - firefox_extension_settings | default({}) | length > 0
+
+- name: Write Firefox extension policies
+  ansible.windows.win_copy:
+    dest: C:\Program Files\Mozilla Firefox\distribution\policies.json
+    content: |
+      {{ {
+          "policies": {
+            "EnterprisePoliciesEnabled": true,
+            "ExtensionSettings": firefox_extension_settings | default({})
+          }
+        } | to_nice_json }}
+  when:
+    - windows_browser_targets.firefox | default(windows_browser_baseline.install_firefox | default(false))
+    - firefox_install_dir is defined
+    - firefox_install_dir.stat.exists | default(false)
+    - firefox_extension_settings | default({}) | length > 0
+
+- name: Write Zen extension policies
+  ansible.windows.win_copy:
+    dest: C:\Program Files\Zen Browser\distribution\policies.json
+    content: |
+      {{ {
+          "policies": {
+            "EnterprisePoliciesEnabled": true,
+            "ExtensionSettings": firefox_extension_settings | default({})
+          }
+        } | to_nice_json }}
+  when:
+    - windows_browser_targets.zen | default(windows_browser_baseline.install_zen | default(false))
+    - zen_install_dir is defined
+    - zen_install_dir.stat.exists | default(false)
+    - firefox_extension_settings | default({}) | length > 0
